@@ -4,10 +4,10 @@
 @Author: xiezizhe
 @Date: 5/2/2020 下午9:51
 """
-from basic.import_package import Conn
-import basic.import_package.Database
-from basic.import_package import Database
-from basic.import_package.Database import Connector
+from python_basics.import_package import Conn
+import python_basics.import_package.Database
+from python_basics.import_package import Database
+from python_basics.import_package.Database import Connector
 
 # Note that relative imports are based on the name of the current module.
 # Since the name of the main module is always "__main__",
@@ -15,7 +15,7 @@ from basic.import_package.Database import Connector
 # from .import_package import Database as Db
 
 if __name__ == "__main__":
-    c1 = basic.import_package.Database.Connector()
+    c1 = python_basics.import_package.Database.Connector()
     c2 = Database.Connector()
     c3 = Connector()
     print(Conn()._Connector__variable)
