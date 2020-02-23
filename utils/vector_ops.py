@@ -38,5 +38,6 @@ if __name__ == "__main__":
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
     print(tf.__version__)
     x = np.random.randint(-5, 5, (3, 2))
+    landmark = np.random.randint(-1, 1, (5, 2))
     print(x)
-    print(square_dist(x))
+    print(square_dist(x, landmark))

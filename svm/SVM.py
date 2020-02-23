@@ -5,13 +5,15 @@
 @Author: xiezizhe
 @Date: 13/2/2020
 """
-import tensorflow as tf
-import numpy as np
-from utils.DataLoader import DataLoader
 import unittest
-import sklearn
+
 import matplotlib.pyplot as plt
+import numpy as np
+import sklearn
+import tensorflow as tf
+
 import utils.vector_ops as vector_ops
+from utils.DataLoader import DataLoader
 
 
 class LinearSVM(tf.keras.Model):
@@ -19,11 +21,11 @@ class LinearSVM(tf.keras.Model):
     SVM implemention: y = W @ x+b
     """
 
-    def __init__(self, num_feature=2, C=1.0):
+    def __init__(self, num_feature=2, c=0.01):
         super(LinearSVM, self).__init__()
         self.W = tf.Variable(tf.random.truncated_normal(shape=[num_feature, 1]), dtype=tf.float32)
         self.b = tf.Variable(tf.random.truncated_normal(shape=[1, 1]), dtype=tf.float32)
-        self.alpha = tf.constant([C], dtype=tf.float32)
+        self.alpha = tf.constant([c], dtype=tf.float32)
 
     def call(self, x, **kwargs):
         model_output = tf.add(tf.matmul(x, self.W), self.b)
@@ -31,8 +33,8 @@ class LinearSVM(tf.keras.Model):
 
     def loss(self, y, model_output):
         l2_norm = tf.nn.l2_loss(self.W)
-        classification_term = tf.reduce_mean(tf.maximum(0., tf.subtract(1., tf.multiply(model_output, y))))
-        loss = tf.add(classification_term, tf.multiply(self.alpha, l2_norm))
+        classification_term = tf.reduce_mean(tf.maximum(0., 1.0 - tf.multiply(model_output, y)))
+        loss = tf.add(classification_term, self.alpha * l2_norm)
         return loss
 
     def accu(self, y, model_output):
@@ -42,11 +44,6 @@ class LinearSVM(tf.keras.Model):
 
     def params(self):
         return self.W.numpy(), self.b.numpy()
-
-
-class PolynomialKernelSVM(tf.keras.Model):
-    def __init__(self, *args, **kwargs):
-        super(PolynomialKernelSVM, self).__init__(*args, **kwargs)
 
 
 class GaussianKernelSVM(tf.keras.Model):
@@ -64,10 +61,16 @@ class GaussianKernelSVM(tf.keras.Model):
         self.C = tf.constant([c], dtype=tf.float32)
         self.batch_size = batch_size
 
-    def call(self, x, landmark=None, **kwargs):
-        kernel = vector_ops.square_dist(x, landmark, lambda v: tf.exp(-self.gamma * tf.abs(v)))
-        model_output = tf.matmul(self.alpha, kernel)
-        return model_output, kernel
+    def call(self, x, xi=None, **kwargs):
+        """
+
+        :param x:
+        :param xi:
+        :param kwargs:
+        :return: shape (x.shape[0],landmark.shape[0])
+        """
+        kernel = vector_ops.square_dist(x, xi, lambda v: tf.exp(-self.gamma * tf.abs(v)))
+        return kernel
 
     def loss(self, y, kernel):
         aa = tf.matmul(tf.transpose(self.alpha), self.alpha)
@@ -77,11 +80,13 @@ class GaussianKernelSVM(tf.keras.Model):
             print('wrong')
         return loss
 
-    def accu(self, y, model_output):
-        model_output = tf.multiply(tf.transpose(y), model_output)
+    def accu(self, y, yi, pred_kernel):
+        model_output = tf.matmul(tf.transpose(yi) * self.alpha, tf.transpose(pred_kernel))
         prediction = tf.sign(model_output - tf.reduce_mean(model_output))
-        accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.squeeze(prediction), tf.squeeze(y)), tf.float32))
-        return accuracy
+        if y is not None:
+            accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.squeeze(prediction), tf.squeeze(y)), tf.float32))
+            return accuracy, tf.reshape(prediction, (-1,))
+        return np.nan, tf.reshape(prediction, (-1,))
 
 
 class NonLinearSVM(tf.keras.Model):
@@ -101,16 +106,21 @@ class NonLinearSVM(tf.keras.Model):
 
 class TestSVM(unittest.TestCase):
     def setUp(self) -> None:
+        physical_devices = tf.config.list_physical_devices('GPU')
+        if physical_devices is not None and len(physical_devices) > 0:
+            tf.config.experimental.set_memory_growth(physical_devices[0], True)
         self.data_loader = DataLoader()
 
     def test_linear(self):
         (x_train, y_train), (x_test, y_test) = self.data_loader.loadIris1(0.8)
-        svm = LinearSVM()
+        svm = LinearSVM(num_feature=2)
         svm.compile(optimizer=tf.optimizers.SGD(0.01), loss=svm.loss, metrics=[svm.accu])
-        svm.fit(x_train, y_train, batch_size=64, epochs=500, verbose=0)
+        svm.fit(x_train, y_train, batch_size=64, epochs=400, verbose=0)
 
         results = svm.evaluate(x_test, y_test)
-        print("test result: ", results)
+        print("test result: ", results, svm.params())
+
+        self.assertGreater(results[1], 0.9)
 
         a = float(-svm.W[0] / svm.W[1])
         xx = np.linspace(-2.5, 2.5)
@@ -122,24 +132,24 @@ class TestSVM(unittest.TestCase):
                                color='black').show()
 
     def test_gaussian(self):
-        def draw(x_vals, y_vals):
+        def draw(x_vals, y_vals, show=True):
             class1_x = [x[0] for i, x in enumerate(x_vals) if y_vals[i] == 1]
             class1_y = [x[1] for i, x in enumerate(x_vals) if y_vals[i] == 1]
             class2_x = [x[0] for i, x in enumerate(x_vals) if y_vals[i] == -1]
             class2_y = [x[1] for i, x in enumerate(x_vals) if y_vals[i] == -1]
-            plt.plot(class1_x, class1_y, 'ro', label='I. setosa')
-            plt.plot(class2_x, class2_y, 'kx', label='I. versicolor')
-            # plt.plot(class3_x, class3_y, 'gv', label='I. virginica')
-            plt.title('Gaussian SVM Results on Iris Data')
-            plt.xlabel('Pedal Length')
-            plt.ylabel('Sepal Width')
-            plt.legend(loc='lower right')
-            # plt.ylim([-0.5, 3.0])
-            # plt.xlim([3.5, 8.5])
-            plt.show()
+            if show:
+                plt.plot(class1_x, class1_y, 'ro', label='I. setosa')
+                plt.plot(class2_x, class2_y, 'kx', label='I. versicolor')
+                # plt.plot(class3_x, class3_y, 'gv', label='I. virginica')
+                plt.title('Gaussian SVM Results on Iris Data')
+                plt.xlabel('Pedal Length')
+                plt.ylabel('Sepal Width')
+                plt.legend(loc='lower right')
+                plt.show()
+            return class1_x, class1_y, class2_x, class2_y
 
         (x_vals, y_vals) = sklearn.datasets.make_circles(n_samples=3000, factor=.5, noise=.1)
-        y_vals = np.array([1.0 if y == 1 else -1.0 for y in y_vals], dtype=np.float)
+        y_vals = np.array([1.0 if y == 1.0 else -1.0 for y in y_vals], dtype=np.float)
 
         split_ratio = 0.9
         x_train, y_train = x_vals[0: int(len(x_vals) * split_ratio)], y_vals[0: int(len(y_vals) * split_ratio)]
@@ -156,13 +166,14 @@ class TestSVM(unittest.TestCase):
         svm = GaussianKernelSVM(batch_size=batch_size)
         optimizer = tf.keras.optimizers.SGD(0.001)
         train_dataset = gen_dataset(x_train, y_train, batch_size)
-        test_dataset = gen_dataset(x_test, y_test, batch_size)
+        test_dataset = gen_dataset(x_test, y_test, 5)
 
+        # train
         def train_step(x_sample, y_sample):
             with tf.GradientTape() as tape:
-                predictions, kernel = svm(x_sample)
-                loss = svm.loss(y_sample, kernel)
-                accu = svm.accu(y_sample, predictions)
+                pred_kernel = svm(x_sample, x_sample)
+                loss = svm.loss(y_sample, pred_kernel)
+                accu, _ = svm.accu(y_sample, y_sample, pred_kernel)
             gradients = tape.gradient(loss, svm.trainable_variables)  # had to indent this!
             optimizer.apply_gradients(zip(gradients, svm.trainable_variables))
             return loss, accu
@@ -175,12 +186,39 @@ class TestSVM(unittest.TestCase):
                 losses.append(loss.numpy())
             print("Epoch: {}, accu: {}, loss: {}".format(epoch, np.mean(accus), np.mean(losses)))
 
+        # test
+        rand_index = np.random.choice(len(x_vals), size=batch_size)
+        rand_x = x_vals[rand_index]
+        rand_y = tf.convert_to_tensor(np.transpose([y_vals[rand_index]]), dtype=tf.float32)
         accus = []
         for (batch, (x, y)) in enumerate(test_dataset):
-            predictions, kernel = svm(x)
-            accu = svm.accu(y, predictions)
+            pred_kernel = svm(x, rand_x)
+            accu, _ = svm.accu(y, rand_y, pred_kernel)
             accus.append(accu)
         print("test accuracy: {}".format(np.mean(accus)))
+        self.assertGreater(np.mean(accus), 0.8)
+        # plot results
+        x_min, x_max = x_vals[:, 0].min() - 1, x_vals[:, 0].max() + 1
+        y_min, y_max = x_vals[:, 1].min() - 1, x_vals[:, 1].max() + 1
+        xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.02),
+                             np.arange(y_min, y_max, 0.02))
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        output_kernel = svm(grid_points, rand_x)
+        _, predictions = svm.accu(None, rand_y, output_kernel)
+        grid_predictions = tf.reshape(predictions, xx.shape)
+
+        # Plot points and grid
+        class1_x, class1_y, class2_x, class2_y = draw(x_vals, y_vals, False)
+        plt.contourf(xx, yy, grid_predictions, cmap=plt.cm.Paired, alpha=0.8)
+        plt.plot(class1_x, class1_y, 'ro', label='Class 1')
+        plt.plot(class2_x, class2_y, 'kx', label='Class -1')
+        plt.title('Gaussian SVM Results')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.legend(loc='lower right')
+        plt.ylim([-1.5, 1.5])
+        plt.xlim([-1.5, 1.5])
+        plt.show()
 
 
 if __name__ == "__main__":
