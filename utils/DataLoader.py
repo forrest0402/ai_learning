@@ -30,6 +30,21 @@ class DataLoader:
         y_test = tf.cast(y[test_indices], dtype=tf.float32)
         return (x_train, y_train), (x_test, y_test)
 
+    def loadIris2(self, ratio=0.8):
+        iris = datasets.load_iris()
+        x_vals = np.array([[x[0], x[3]] for x in iris.data])
+        y_vals1 = np.array([1 if y == 0 else -1 for y in iris.target])
+        y_vals2 = np.array([1 if y == 1 else -1 for y in iris.target])
+        y_vals3 = np.array([1 if y == 2 else -1 for y in iris.target])
+        y_vals = np.array([y_vals1, y_vals2, y_vals3])
+        class1_x = [x[0] for i, x in enumerate(x_vals) if iris.target[i] == 0]
+        class1_y = [x[1] for i, x in enumerate(x_vals) if iris.target[i] == 0]
+        class2_x = [x[0] for i, x in enumerate(x_vals) if iris.target[i] == 1]
+        class2_y = [x[1] for i, x in enumerate(x_vals) if iris.target[i] == 1]
+        class3_x = [x[0] for i, x in enumerate(x_vals) if iris.target[i] == 2]
+        class3_y = [x[1] for i, x in enumerate(x_vals) if iris.target[i] == 2]
+        return (class1_x, class1_y), (class2_x, class2_y), (class3_x, class3_y)
+
     def plot1(self, d1, d2, color='red'):
         x, y = self.__load__('iris1')
         x1 = [d for i, d in enumerate(x) if y[i] == 1]

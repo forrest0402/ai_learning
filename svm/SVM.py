@@ -89,19 +89,34 @@ class GaussianKernelSVM(tf.keras.Model):
         return np.nan, tf.reshape(prediction, (-1,))
 
 
-class NonLinearSVM(tf.keras.Model):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class AMSVM(tf.keras.Model):
+    """
+    SVM implemention: y = Wx+b
+    """
 
-    def call(self, x_data, **kwargs):
-        model_output = tf.add(tf.matmul(x_data, self.W), self.b)
+    def __init__(self, num_classes, num_feature=2, c=0.01):
+        super(AMSVM, self).__init__()
+        self.W = tf.Variable(tf.random.truncated_normal(shape=[num_feature, num_classes]), dtype=tf.float32)
+        self.b = tf.Variable(tf.random.truncated_normal(shape=[1, num_classes]), dtype=tf.float32)
+        self.c = tf.constant([c], dtype=tf.float32)
+
+    def call(self, x, **kwargs):
+        model_output = tf.add(tf.matmul(x, self.W), self.b)
         return model_output
 
     def loss(self, y, model_output):
-        pass
+        l2_norm = tf.nn.l2_loss(self.W)
+        classification_term = tf.reduce_mean(tf.maximum(0., 1.0 - tf.multiply(model_output, y)))
+        loss = tf.add(classification_term, self.c * l2_norm)
+        return loss
 
     def accu(self, y, model_output):
-        pass
+        prediction = tf.sign(model_output)
+        accuracy = tf.reduce_mean(tf.cast(tf.equal(prediction, y), tf.float32))
+        return accuracy
+
+    def params(self):
+        return self.W.numpy(), self.b.numpy()
 
 
 class TestSVM(unittest.TestCase):
@@ -219,6 +234,26 @@ class TestSVM(unittest.TestCase):
         plt.ylim([-1.5, 1.5])
         plt.xlim([-1.5, 1.5])
         plt.show()
+
+    def test_amsvm(self):
+        (class1_x, class1_y), (class2_x, class2_y) = self.data_loader.loadIris1(0.8)
+        svm = AMSVM(num_classes=2, num_feature=2)
+        svm.compile(optimizer=tf.optimizers.SGD(0.01), loss=svm.loss, metrics=[svm.accu])
+        svm.fit(x_train, y_train, batch_size=64, epochs=400, verbose=0)
+
+        results = svm.evaluate(x_test, y_test)
+        print("test result: ", results, svm.params())
+
+        self.assertGreater(results[1], 0.9)
+
+        a = float(-svm.W[0] / svm.W[1])
+        xx = np.linspace(-2.5, 2.5)
+        yy = a * xx - float(svm.b / svm.W[1])
+
+        self.data_loader.plot1((0.0, 10.0),
+                               (float(-svm.b.numpy() / svm.W.numpy()[1]),
+                                float((-svm.b.numpy() - 10 * svm.W.numpy()[0]) / svm.W.numpy()[1])),
+                               color='black').show()
 
 
 if __name__ == "__main__":
