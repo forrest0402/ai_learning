@@ -43,7 +43,7 @@ class DataLoader:
         class2_y = [x[1] for i, x in enumerate(x_vals) if iris.target[i] == 1]
         class3_x = [x[0] for i, x in enumerate(x_vals) if iris.target[i] == 2]
         class3_y = [x[1] for i, x in enumerate(x_vals) if iris.target[i] == 2]
-        return (class1_x, class1_y), (class2_x, class2_y), (class3_x, class3_y)
+        return x_vals, tf.keras.utils.to_categorical(iris.target, num_classes=3)
 
     def plot1(self, d1, d2, color='red'):
         x, y = self.__load__('iris1')

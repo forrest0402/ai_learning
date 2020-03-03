@@ -94,24 +94,58 @@ class AMSVM(tf.keras.Model):
     SVM implemention: y = Wx+b
     """
 
-    def __init__(self, num_classes, num_feature=2, c=0.01):
+    def __init__(self, num_classes, num_feature=2, c=1.0, mode='least_max'):
+        """
+
+        :param num_classes:
+        :param num_feature:
+        :param c:
+        :param mode: all or avg,
+        """
         super(AMSVM, self).__init__()
         self.W = tf.Variable(tf.random.truncated_normal(shape=[num_feature, num_classes]), dtype=tf.float32)
         self.b = tf.Variable(tf.random.truncated_normal(shape=[1, num_classes]), dtype=tf.float32)
         self.c = tf.constant([c], dtype=tf.float32)
 
+        self.num_classes = num_classes
+        if mode in ['avg', 'all', 'least_max']:
+            self.mode = mode
+        else:
+            raise ValueError("invalid mode[all or avg or least_max")
+
     def call(self, x, **kwargs):
+        """
+
+        :param x:
+        :param kwargs:
+        :return: shape (batch_size, num_classes)
+        """
         model_output = tf.add(tf.matmul(x, self.W), self.b)
         return model_output
 
     def loss(self, y, model_output):
+        """
+
+        :param y: shape (batch_size, num_classes)
+        :param model_output:
+        :return:
+        """
         l2_norm = tf.nn.l2_loss(self.W)
-        classification_term = tf.reduce_mean(tf.maximum(0., 1.0 - tf.multiply(model_output, y)))
-        loss = tf.add(classification_term, self.c * l2_norm)
+        Wi = tf.reduce_sum(tf.multiply(model_output, y), axis=1, keepdims=True)
+        if self.mode == 'least_max':
+            Wj = tf.reduce_max(tf.multiply(model_output, 1.0 - y), axis=1, keepdims=True)
+            classification_term = tf.reduce_sum(tf.maximum(0.0, 1.0 - Wi + Wj))
+        elif self.mode == 'avg':
+            classification_term = tf.reduce_sum(tf.maximum(0.0, 1.0 - Wi + (
+                    tf.reduce_mean(model_output, 1) * self.num_classes - Wi) / (self.num_classes - 1)))
+        else:
+            classification_term = tf.reduce_sum(tf.maximum(0.0, 1.0 - (Wi - model_output) - y))
+        loss = classification_term + self.c * l2_norm
         return loss
 
     def accu(self, y, model_output):
-        prediction = tf.sign(model_output)
+        y = tf.cast(tf.squeeze(tf.argmax(y, 1)), tf.float32)
+        prediction = tf.cast(tf.squeeze(tf.argmax(model_output, 1)), tf.float32)
         accuracy = tf.reduce_mean(tf.cast(tf.equal(prediction, y), tf.float32))
         return accuracy
 
@@ -125,6 +159,10 @@ class TestSVM(unittest.TestCase):
         if physical_devices is not None and len(physical_devices) > 0:
             tf.config.experimental.set_memory_growth(physical_devices[0], True)
         self.data_loader = DataLoader()
+
+    def gen_dataset(self, x, y, batch_size):
+        x, y = tf.cast(x, dtype=tf.float32), tf.reshape(tf.cast(y, dtype=tf.float32), shape=(-1, 1))
+        return tf.data.Dataset.from_tensor_slices((x, y)).batch(batch_size, drop_remainder=True)
 
     def test_linear(self):
         (x_train, y_train), (x_test, y_test) = self.data_loader.loadIris1(0.8)
@@ -172,16 +210,12 @@ class TestSVM(unittest.TestCase):
         draw(x_train, y_train)
         draw(x_test, y_test)
 
-        def gen_dataset(x, y, batch_size):
-            x, y = tf.cast(x, dtype=tf.float32), tf.reshape(tf.cast(y, dtype=tf.float32), shape=(-1, 1))
-            return tf.data.Dataset.from_tensor_slices((x, y)).batch(batch_size, drop_remainder=True)
-
         batch_size = 256
         epochs = 300
         svm = GaussianKernelSVM(batch_size=batch_size)
         optimizer = tf.keras.optimizers.SGD(0.001)
-        train_dataset = gen_dataset(x_train, y_train, batch_size)
-        test_dataset = gen_dataset(x_test, y_test, 5)
+        train_dataset = self.gen_dataset(x_train, y_train, batch_size)
+        test_dataset = self.gen_dataset(x_test, y_test, 5)
 
         # train
         def train_step(x_sample, y_sample):
@@ -236,24 +270,31 @@ class TestSVM(unittest.TestCase):
         plt.show()
 
     def test_amsvm(self):
-        (class1_x, class1_y), (class2_x, class2_y) = self.data_loader.loadIris1(0.8)
-        svm = AMSVM(num_classes=2, num_feature=2)
-        svm.compile(optimizer=tf.optimizers.SGD(0.01), loss=svm.loss, metrics=[svm.accu])
-        svm.fit(x_train, y_train, batch_size=64, epochs=400, verbose=0)
+        (x_train, y_train) = self.data_loader.loadIris2(0.8)
+        svm = AMSVM(num_classes=3, num_feature=2, c=0.001)
+        # optimizer = tf.keras.optimizers.Adam(0.1)
+        # train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train)).batch(50, drop_remainder=True).shuffle(
+        #     50)
+        # train
+        # def train_step(x_sample, y_sample):
+        #     with tf.GradientTape() as tape:
+        #         output = svm(x_sample)
+        #         loss = svm.loss(y_sample, output)
+        #         accu = svm.accu(y_sample, output)
+        #     gradients = tape.gradient(loss, svm.trainable_variables)  # had to indent this!
+        #     optimizer.apply_gradients(zip(gradients, svm.trainable_variables))
+        #     return loss, accu
+        #
+        # for epoch in range(400):
+        #     accus, losses = [], []
+        #     for (batch, (x, y)) in enumerate(train_dataset):
+        #         loss, accu = train_step(x_sample=x, y_sample=y)
+        #         accus.append(accu.numpy())
+        #         losses.append(loss.numpy())
+        #     print("Epoch: {}, accu: {}, loss: {}".format(epoch, np.mean(accus), np.mean(losses)))
 
-        results = svm.evaluate(x_test, y_test)
-        print("test result: ", results, svm.params())
-
-        self.assertGreater(results[1], 0.9)
-
-        a = float(-svm.W[0] / svm.W[1])
-        xx = np.linspace(-2.5, 2.5)
-        yy = a * xx - float(svm.b / svm.W[1])
-
-        self.data_loader.plot1((0.0, 10.0),
-                               (float(-svm.b.numpy() / svm.W.numpy()[1]),
-                                float((-svm.b.numpy() - 10 * svm.W.numpy()[0]) / svm.W.numpy()[1])),
-                               color='black').show()
+        svm.compile(optimizer=tf.optimizers.Adam(0.1), loss=svm.loss, metrics=[svm.accu])
+        svm.fit(x_train, y_train, batch_size=50, epochs=100)
 
 
 if __name__ == "__main__":
